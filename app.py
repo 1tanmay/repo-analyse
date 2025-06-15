@@ -71,31 +71,35 @@ def get_commit_activity(repo, days=30):
 
 def get_contributor_stats(repo):
     """Get contributor statistics"""
-    contributors = repo.get_stats_contributors()
-    if not contributors:
+    try:
+        # First try to get basic contributor info which is usually faster
+        contributors = list(repo.get_contributors())
+        if not contributors:
+            return None, None
+            
+        # Sort by number of contributions
+        contributors_sorted = sorted(
+            contributors,
+            key=lambda x: x.contributions,
+            reverse=True
+        )[:10]  # Limit to top 10
+        
+        # Prepare data for display
+        contributor_data = [
+            {
+                "login": c.login,
+                "commits": c.contributions,
+                "profile_url": c.html_url,
+                "avatar_url": c.avatar_url
+            }
+            for c in contributors_sorted
+        ]
+        
+        return pd.DataFrame(contributor_data), contributors_sorted
+        
+    except Exception as e:
+        st.warning(f"Could not fetch contributor data: {str(e)}")
         return None, None
-    
-    # Get top 10 contributors by commits
-    top_contributors = sorted(
-        contributors, 
-        key=lambda x: x.total if x.total else 0, 
-        reverse=True
-    )[:10]
-    
-    # Prepare data for bar chart
-    contributor_data = [
-        {
-            "login": c.author.login if c.author else "Unknown",
-            "commits": c.total,
-            "additions": sum(week.a for week in c.weeks) if c.weeks else 0,
-            "deletions": sum(week.d for week in c.weeks) if c.weeks else 0,
-        }
-        for c in top_contributors
-    ]
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(contributor_data)
-    return df, top_contributors
 
 def main():
     st.title("GitHub Repository Analyzer")
@@ -195,40 +199,44 @@ def main():
                             )
                             st.plotly_chart(fig_contributors, use_container_width=True)
                             
-                            # Add/Delete Stats
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.markdown("### Code Additions by Contributor")
-                                fig_additions = px.bar(
-                                    contributors_df,
-                                    x="login",
-                                    y="additions",
-                                    color="login",
-                                    labels={"login": "Contributor", "additions": "Lines Added"}
-                                )
-                                st.plotly_chart(fig_additions, use_container_width=True)
+                            # Display contributor avatars and stats
+                            st.markdown("### Top Contributors")
                             
-                            with col2:
-                                st.markdown("### Code Deletions by Contributor")
-                                fig_deletions = px.bar(
-                                    contributors_df,
-                                    x="login",
-                                    y="deletions",
-                                    color="login",
-                                    labels={"login": "Contributor", "deletions": "Lines Deleted"}
-                                )
-                                st.plotly_chart(fig_deletions, use_container_width=True)
+                            # Create a grid of contributor cards
+                            cols = st.columns(5)  # 5 columns for the grid
+                            
+                            for idx, (_, row) in enumerate(contributors_df.iterrows()):
+                                with cols[idx % 5]:
+                                    st.markdown(
+                                        f"""
+                                        <div style='text-align: center; margin-bottom: 1.5rem;'>
+                                            <img src='{row['avatar_url']}&s=80' width='60' style='border-radius: 50%;'><br>
+                                            <div style='margin-top: 0.5rem;'>
+                                                <a href='{row['profile_url']}' target='_blank' style='text-decoration: none;'>
+                                                    <strong>{row['login']}</strong>
+                                                </a>
+                                            </div>
+                                            <div style='font-size: 0.9rem; color: #6c757d;'>
+                                                {row['commits']:,} commits
+                                            </div>
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True
+                                    )
                             
                             # Detailed Contributor Stats
-                            with st.expander("👥 View Detailed Contributor Statistics"):
+                            with st.expander("📊 View Detailed Contributor Statistics"):
                                 st.dataframe(
-                                    contributors_df.rename(columns={
+                                    contributors_df[['login', 'commits']].rename(columns={
                                         "login": "Contributor",
-                                        "commits": "Total Commits",
-                                        "additions": "Total Additions",
-                                        "deletions": "Total Deletions"
+                                        "commits": "Total Commits"
                                     }),
-                                    use_container_width=True
+                                    use_container_width=True,
+                                    column_config={
+                                        "Contributor": st.column_config.TextColumn("Contributor"),
+                                        "Total Commits": st.column_config.NumberColumn("Commits")
+                                    },
+                                    hide_index=True
                                 )
                         
                         # Commit Activity
